@@ -1,11 +1,13 @@
-import { getDb } from "../lib/mongodb";
+import type { RequestHandler } from './$types';
+import { json } from '@sveltejs/kit';
+import { getDb } from '$lib/server/mongo';
 
 type RequestBody = {
   url?: string;
   alias?: string;
 };
 
-type Response = {
+type ResponseBody = {
   success: boolean;
   alias?: string;
   error?: string;
@@ -13,13 +15,14 @@ type Response = {
 
 const MAX_ATTEMPTS = 5;
 
-// Generate an 8‑character alias using a custom alphabet that excludes ambiguous
+// Generate an 8-character alias using a custom alphabet that excludes ambiguous
 // characters such as 1, i, l, o, and 0. The alphabet consists of uppercase
-// letters (excluding I, L, O) and digits 2‑9.
-const ALIAS_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+// letters (excluding I, L, O) and digits 2-9.
+const ALIAS_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ALIAS_LENGTH = 8;
+
 const generateAlias = (): string => {
-  let result = "";
+  let result = '';
   const alphabetLength = ALIAS_ALPHABET.length;
   for (let i = 0; i < ALIAS_LENGTH; i++) {
     const idx = Math.floor(Math.random() * alphabetLength);
@@ -37,10 +40,18 @@ const normalizeUrl = (raw: string): string => {
   }
 };
 
-export default defineEventHandler(async (event): Promise<Response> => {
-  const body: RequestBody = await readBody(event);
+export const POST: RequestHandler = async ({ request }) => {
+  let body: RequestBody;
+  try {
+    body = await request.json();
+  } catch {
+    const resp: ResponseBody = { success: false, error: 'invalid_json' };
+    return json(resp, { status: 400 });
+  }
+
   const database = await getDb();
-  const collection = database.collection("urls");
+  const collection = database.collection('urls');
+
   const normalizedUrl = body.url ? normalizeUrl(body.url) : undefined;
   let aliasToStore: string | undefined = body.alias?.trim() || undefined;
 
@@ -49,10 +60,10 @@ export default defineEventHandler(async (event): Promise<Response> => {
   if (aliasToStore) {
     const aliasExists = await collection.findOne({ alias: aliasToStore });
     if (aliasExists) {
-      return { success: false, error: "unavailable" };
+      const resp: ResponseBody = { success: false, error: 'unavailable' };
+      return json(resp, { status: 409 });
     }
   } else {
-    
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const candidate = generateAlias();
       const existsAlias = await collection.findOne({ alias: candidate });
@@ -62,13 +73,15 @@ export default defineEventHandler(async (event): Promise<Response> => {
       }
     }
     if (!aliasToStore) {
-      throw new Error("Failed to generate a unique alias after multiple attempts.");
+      throw new Error(
+        'Failed to generate a unique alias after multiple attempts.'
+      );
     }
   }
 
   if (normalizedUrl) {
     const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
-    
+
     await collection.updateOne(
       { alias: aliasToStore },
       {
@@ -76,13 +89,16 @@ export default defineEventHandler(async (event): Promise<Response> => {
           url: normalizedUrl,
           createdAt: now,
           expires,
-          alias: aliasToStore,
-        },
+          alias: aliasToStore
+        }
       },
       { upsert: true }
     );
-    return { success: true, alias: aliasToStore };
+
+    const resp: ResponseBody = { success: true, alias: aliasToStore };
+    return json(resp);
   }
 
-  return { success: false, error: "no_url" };
-});
+  const resp: ResponseBody = { success: false, error: 'no_url' };
+  return json(resp, { status: 400 });
+};
