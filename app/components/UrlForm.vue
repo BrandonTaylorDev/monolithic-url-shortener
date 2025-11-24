@@ -40,7 +40,7 @@
       <input
         type="text"
         readonly
-        value="http://localhost:3000"
+        value="https://short.brandontaylor.dev/"
         class="flex-1 p-2 border border-gray-300 rounded text-zinc-900 bg-gray-100"
       />
       <span class="mx-1 whitespace-nowrap">/s/</span>
